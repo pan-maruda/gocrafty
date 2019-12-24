@@ -1,12 +1,9 @@
-// +build
-
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
-
-	"encoding/binary"
 
 	"github.com/paypal/gatt"
 	"github.com/paypal/gatt/examples/option"
@@ -68,23 +65,31 @@ func onPeriphConnectied(p gatt.Peripheral, err error) {
 		for _, char := range chars {
 			fmt.Printf("		UUID: %s, props: %s", char.UUID(), char.Properties())
 			if (char.Properties() & gatt.CharRead) != 0 {
-
-				value, err := p.ReadCharacteristic(char)
-				if err != nil {
-					fmt.Printf("	Failed to read, err: %s\n")
+				value, err := ReadUint16(p, char)
+				if err == nil {
+					fmt.Printf(" uint16 value: %d", value)
 				} else {
-
-					fmt.Printf("	value: %x | %q", value, value)
-					if len(value) == 2 {
-						int_value := binary.LittleEndian.Uint16(value[0:])
-						fmt.Printf("\t| uint16 LE: %d", int_value)
-					}
+					fmt.Printf(" read failed: %s", err)
 				}
+
 			}
 			print("\n")
 
 		}
 	}
+}
+
+func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
+	value, err := p.ReadCharacteristic(c)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(value) == 2 {
+		intValue := binary.LittleEndian.Uint16(value[0:])
+		return intValue, nil
+	}
+	return 0, fmt.Errorf("characteristic %s read != 2 bytes: %x", c.Name(), value)
 }
 
 func main() {
