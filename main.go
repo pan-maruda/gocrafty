@@ -34,46 +34,54 @@ func onPeriphDiscovered(craftyID string) func(gatt.Peripheral, *gatt.Advertiseme
 
 }
 
-func onPeriphConnected(p gatt.Peripheral, err error) {
-	p.Device().StopScanning()
+func onPeriphConnected(craftyID string) func(gatt.Peripheral, error) {
 
-	defer p.Device().CancelConnection(p)
-	defer fmt.Printf("Disconnected from %s", p.ID())
-	// defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
-	log.Println("Discovering Crafty services")
-
-	services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID})
-	if err != nil {
-		log.Fatalf("Failed to discover services, err :%s\n", err)
-		return
-	}
-
-	for _, svc := range services {
-
-		if svc.UUID().Equal(ble.DataServiceUUID) {
-			data, err := ble.ReadDataServiceCharacteristics(p, svc)
-			if err != nil {
-				log.Printf("Failed to read metadata from Crafty: %s\n", err)
-				continue
-			}
-			fmt.Println(data)
+	return func(p gatt.Peripheral, err error) {
+		if p.ID() != craftyID {
+			fmt.Printf("Unexpected device ID [%s] connected instead of [%s]. WTF?", p.ID(), craftyID)
+			return
 		}
 
-		if svc.UUID().Equal(ble.MetaServiceUUID) {
-			meta, err := ble.ReadMetadataService(p, svc)
-			if err != nil {
-				log.Printf("Failed to read metadata from Crafty: %s\n", err)
-				continue
-			}
-			fmt.Println(meta)
+		p.Device().StopScanning()
 
+		defer p.Device().CancelConnection(p)
+		defer fmt.Printf("Disconnected from %s", p.ID())
+		defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
+		log.Println("Discovering Crafty services")
+
+		services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID})
+		if err != nil {
+			log.Fatalf("Failed to discover services, err :%s\n", err)
+			return
 		}
 
+		for _, svc := range services {
+
+			if svc.UUID().Equal(ble.DataServiceUUID) {
+				data, err := ble.ReadDataServiceCharacteristics(p, svc)
+				if err != nil {
+					log.Printf("Failed to read metadata from Crafty: %s\n", err)
+					continue
+				}
+				fmt.Println(data)
+			}
+
+			if svc.UUID().Equal(ble.MetaServiceUUID) {
+				meta, err := ble.ReadMetadataService(p, svc)
+				if err != nil {
+					log.Printf("Failed to read metadata from Crafty: %s\n", err)
+					continue
+				}
+				fmt.Println(meta)
+
+			}
+
+		}
 	}
 }
 
 func main() {
-
+	done := make(chan bool, 1)
 	craftyID, found := os.LookupEnv("CRAFTY_ID")
 	if !found {
 		fmt.Println("CRAFTY_ID not set, use ./scanner to find your Crafty.")
@@ -90,5 +98,8 @@ func main() {
 	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID)),
 		gatt.PeripheralConnected(onPeriphConnected))
 	d.Init(onStateChanged)
-	select {}
+	select {
+	case <-done:
+		os.Exit(0)
+	}
 }
