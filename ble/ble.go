@@ -131,9 +131,7 @@ func ReadMetadataService(p gatt.Peripheral, svc *gatt.Service) (*CraftyMeta, err
 	for _, char := range chars {
 
 		value, err := ReadString(p, char)
-		if err == nil {
-			print(value)
-		} else {
+		if err != nil {
 			fmt.Printf("%s read failed: %s", svc.UUID(), err)
 		}
 
@@ -162,12 +160,11 @@ func ReadDataServiceCharacteristics(p gatt.Peripheral, svc *gatt.Service) (*Craf
 	craftyStatus := CraftyStatus{}
 
 	for _, char := range chars {
-		fmt.Printf("trying to read uint16 from %s \n", char.UUID())
 		intValue, err := ReadUint16(p, char)
 		if err != nil {
-			fmt.Printf(" read failed: %s", err)
+			// TODO check if the characteristic is really in the ones we want
+			// fmt.Printf(" read failed: %s", err)
 		} else {
-			fmt.Printf("Read %d from %s", intValue, char.UUID())
 			if char.UUID().Equal(TempSetpointUUID) {
 				craftyStatus.tempSetpoint = intValue
 			}
@@ -180,7 +177,6 @@ func ReadDataServiceCharacteristics(p gatt.Peripheral, svc *gatt.Service) (*Craf
 			if char.UUID().Equal(BatteryLevelUUID) {
 				craftyStatus.batteryLevel = intValue
 			}
-			fmt.Printf("DEBUG: craftyStatus = %s", craftyStatus)
 		}
 
 	}

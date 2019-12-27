@@ -33,6 +33,7 @@ func onPeriphDiscovered(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 
 func onPeriphConnected(p gatt.Peripheral, err error) {
 	defer p.Device().CancelConnection(p)
+	defer fmt.Printf("Disconnected from %s", p.Name())
 
 	log.Println("Discovering Crafty services")
 
