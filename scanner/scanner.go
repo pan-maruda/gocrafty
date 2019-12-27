@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/pan-maruda/gocrafty/ble"
 	"github.com/paypal/gatt"
 	"github.com/paypal/gatt/examples/option"
 )
+
+var devicesFound = make(map[string]*ble.CraftyMeta)
 
 func onStateChanged(d gatt.Device, s gatt.State) {
 	fmt.Println("State:", s)
@@ -22,12 +26,12 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	}
 }
 
-func onPeriphDiscovered(craftyID string) func(gatt.Peripheral, *gatt.Advertisement, int) {
+func onPeriphDiscovered(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
+	if a.LocalName == "STORZ&BICKEL" {
 
-	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
-		// TODO add selection list or mac input, not connect to the first one
-		if p.ID() == craftyID {
-			fmt.Printf("Connecting to %s [%s]\n", p.ID(), p.Name())
+		if devicesFound[p.ID()] == nil {
+			fmt.Printf("\nPeripheral ID:%s, NAME:(%s)\n", p.ID(), p.Name())
+			fmt.Printf("Connecting to %s\n", p.ID())
 			p.Device().Connect(p)
 		}
 	}
@@ -35,11 +39,8 @@ func onPeriphDiscovered(craftyID string) func(gatt.Peripheral, *gatt.Advertiseme
 }
 
 func onPeriphConnected(p gatt.Peripheral, err error) {
-	p.Device().StopScanning()
-
 	defer p.Device().CancelConnection(p)
-	defer fmt.Printf("Disconnected from %s", p.ID())
-	// defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
+
 	log.Println("Discovering Crafty services")
 
 	services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID})
@@ -49,37 +50,23 @@ func onPeriphConnected(p gatt.Peripheral, err error) {
 	}
 
 	for _, svc := range services {
-
-		if svc.UUID().Equal(ble.DataServiceUUID) {
-			data, err := ble.ReadDataServiceCharacteristics(p, svc)
-			if err != nil {
-				log.Printf("Failed to read metadata from Crafty: %s\n", err)
-				continue
-			}
-			fmt.Println(data)
-		}
-
 		if svc.UUID().Equal(ble.MetaServiceUUID) {
 			meta, err := ble.ReadMetadataService(p, svc)
 			if err != nil {
 				log.Printf("Failed to read metadata from Crafty: %s\n", err)
 				continue
 			}
-			fmt.Println(meta)
 
+			fmt.Printf("found: %s\n", meta)
+			devicesFound[p.ID()] = meta
 		}
-
 	}
 }
 
 func main() {
-
-	craftyID, found := os.LookupEnv("CRAFTY_ID")
-	if !found {
-		fmt.Println("CRAFTY_ID not set, use ./scanner to find your Crafty.")
-		os.Exit(1)
-	}
-
+	sigs := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	d, err := gatt.NewDevice(option.DefaultClientOptions...)
 	if err != nil {
 		log.Fatalf("Failed to open device, err: %s\n", err)
@@ -87,8 +74,20 @@ func main() {
 	}
 
 	// Register handlers.
-	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID)),
+	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered),
 		gatt.PeripheralConnected(onPeriphConnected))
 	d.Init(onStateChanged)
-	select {}
+
+	go func() {
+		<-sigs
+		d.StopScanning()
+		done <- true
+	}()
+
+	<-done
+	fmt.Println("\n\n======= [Found devices] =======")
+
+	for _, meta := range devicesFound {
+		fmt.Println(meta)
+	}
 }

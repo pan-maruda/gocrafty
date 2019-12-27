@@ -81,7 +81,7 @@ func (c CraftyStatus) String() string {
 
 func (c CraftyMeta) String() string {
 	return fmt.Sprintf(
-		"%s SN:%s FW:%s ID:%s",
+		"Model: [%s] SN: [%s] FW: [%s] ID [%s]",
 		c.ModelName(), c.SerialNumber(), c.FwVersion(), c.ID(),
 	)
 }
