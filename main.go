@@ -35,7 +35,7 @@ func onPeriphDiscovered(craftyID string, done <-chan bool) func(gatt.Peripheral,
 
 }
 
-func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Peripheral, *ble.DataService)) func(gatt.Peripheral, error) {
+func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Peripheral, *ble.DataService, *ble.SettingsService)) func(gatt.Peripheral, error) {
 
 	return func(p gatt.Peripheral, err error) {
 
@@ -46,20 +46,18 @@ func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Periphe
 
 		p.Device().StopScanning()
 
-		services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID})
+		services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID, ble.SettingsServiceUUID})
 		if err != nil {
 			log.Fatalf("Failed to discover services, err :%s\n", err)
 			return
 		}
 
 		var dataSvc *ble.DataService
-		// var metaSvc *gatt.Service
+		var settingsSvc *ble.SettingsService
 
 		for _, svc := range services {
 
 			if svc.UUID().Equal(ble.DataServiceUUID) {
-				// dataSvc = svc
-
 				if disc, err := ble.DiscoverDataService(p, svc); err == nil {
 					data, err := ble.ReadDataServiceCharacteristics(p, disc)
 					if err != nil {
@@ -84,13 +82,33 @@ func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Periphe
 				}
 				fmt.Println(meta)
 			}
+
+			if svc.UUID().Equal(ble.SettingsServiceUUID) {
+				settings, err := ble.DiscoverSettingsService(p, svc)
+				if err != nil {
+					log.Printf("Failed to discover settings service on Crafty: %s\n", err)
+					continue
+				}
+
+				chargeIndicator, err := settings.ChargeIndicatorStatus(p)
+				if err != nil {
+					log.Printf("Failed to read charging indicator status: %s", err)
+				}
+				print("Chariging indicator:")
+				if chargeIndicator {
+					println(" ON")
+				} else {
+					println(" OFF")
+				}
+				settingsSvc = settings
+			}
 		}
 
-		action(p, dataSvc)
+		action(p, dataSvc, settingsSvc)
 	}
 }
 
-func monitor(p gatt.Peripheral, dataSvc *ble.DataService) {
+func monitor(p gatt.Peripheral, dataSvc *ble.DataService, settingsSvc *ble.SettingsService) {
 	if dataSvc == nil {
 		fmt.Printf("Data service is nil - not discovered? wtf?")
 		return
@@ -104,9 +122,9 @@ func monitor(p gatt.Peripheral, dataSvc *ble.DataService) {
 	select {}
 }
 
-func setValues(temp *int, boost *int, done chan bool) func(gatt.Peripheral, *ble.DataService) {
+func setValues(temp *int, boost *int, chargeIndicator *string, done chan bool) func(gatt.Peripheral, *ble.DataService, *ble.SettingsService) {
 	// todo validate this somewhere else
-	return func(p gatt.Peripheral, ds *ble.DataService) {
+	return func(p gatt.Peripheral, ds *ble.DataService, ss *ble.SettingsService) {
 		if temp != nil && *temp != -1 {
 			if *temp > 210 {
 				fmt.Println("Temperature cannot exceed 210.")
@@ -135,6 +153,31 @@ func setValues(temp *int, boost *int, done chan bool) func(gatt.Peripheral, *ble
 				ds.SetBoost(p, validBoost)
 			}
 		}
+
+		if *chargeIndicator != "" {
+			switch *chargeIndicator {
+			case "ON":
+				println("Turning charge indicator ON.")
+				ss.SetChargeIndicatorStatus(p, true)
+			case "OFF":
+				println("Turning charge indicator OFF.")
+				ss.SetChargeIndicatorStatus(p, false)
+			default:
+				fmt.Printf("Unrecognized option [%s] for charge indicator. Must be ON or OFF.\n", *chargeIndicator)
+			}
+			// todo cleanup
+			// fixme why does this need to be read to work more reliably?
+			chargeIndicator, err := ss.ChargeIndicatorStatus(p)
+			if err != nil {
+				log.Printf("Failed to read charging indicator status: %s", err)
+			}
+			print("Chariging indicator:")
+			if chargeIndicator {
+				println(" ON")
+			} else {
+				println(" OFF")
+			}
+		}
 		done <- true
 
 	}
@@ -157,14 +200,15 @@ func main() {
 	// var oneshot = flag.Bool("oneshot", false, "Read data only once (no notifications)")
 	var tempFlag = flag.Int("set-temp", -1, "set base vape temperature point")
 	var boostTempFlag = flag.Int("set-boost", -1, "set boost value (positive only)")
+	var chargeIndicator = flag.String("set-charge-indicator", "", "set charging indicator ON or OFF")
 	flag.Parse()
 	d.Init(onStateChanged)
-	if *tempFlag == -1 && *boostTempFlag == -1 {
+	if *tempFlag == -1 && *boostTempFlag == -1 && *chargeIndicator == "" {
 		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
 			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, monitor)))
 	} else {
 		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
-			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, setValues(tempFlag, boostTempFlag, done))))
+			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, setValues(tempFlag, boostTempFlag, chargeIndicator, done))))
 	}
 
 	// Register handlers.

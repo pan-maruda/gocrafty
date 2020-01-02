@@ -21,6 +21,9 @@ var ModelUUID = gatt.MustParseUUID("00000022-4c45-4b43-4942-265a524f5453")
 var VersionUUID = gatt.MustParseUUID("00000032-4c45-4b43-4942-265a524f5453")
 var SerialUUID = gatt.MustParseUUID("00000052-4c45-4b43-4942-265a524f5453")
 
+var SettingsServiceUUID = gatt.MustParseUUID("00000003-4c45-4b43-4942-265a524f5453")
+var ChargeIndicatorUUID = gatt.MustParseUUID("000001c34c454b434942265a524f5453")
+
 // CraftyMeta contains metadata about connected Crafty, such as FW version, serial number etc.
 type CraftyMeta struct {
 	modelName    string
@@ -47,6 +50,13 @@ type DataService struct {
 	boostTemp    *gatt.Characteristic
 	batteryLevel *gatt.Characteristic
 	led          *gatt.Characteristic
+}
+
+// SettingsService struct contains pointers to characteristics
+// of various settings of the vaporizer not related to temperature.
+// TODO naming?
+type SettingsService struct {
+	chargeIndicator *gatt.Characteristic
 }
 
 func (ds DataService) String() string {
@@ -334,4 +344,41 @@ func ReadDataServiceCharacteristics(p gatt.Peripheral, ds *DataService) (*Crafty
 	}
 
 	return &craftyStatus, nil
+}
+
+// DiscoverSettingsService discovers characteristics and returns SettingsService with pointers to
+// characteristics we care about.
+func DiscoverSettingsService(p gatt.Peripheral, svc *gatt.Service) (*SettingsService, error) {
+	chars, err := p.DiscoverCharacteristics([]gatt.UUID{ChargeIndicatorUUID}, svc)
+	if err != nil {
+		fmt.Printf("Failed to discover settings service characteristics: %s", err)
+		return nil, err
+	}
+
+	settingsService := SettingsService{}
+
+	for _, ch := range chars {
+		if ch.UUID().Equal(ChargeIndicatorUUID) {
+			settingsService.chargeIndicator = ch
+			continue
+		}
+	}
+
+	return &settingsService, nil
+}
+
+func (ss SettingsService) ChargeIndicatorStatus(p gatt.Peripheral) (bool, error) {
+	intValue, err := ReadUint16(p, ss.chargeIndicator)
+	if err != nil {
+		return false, err
+	}
+	return intValue == 0, nil
+}
+
+func (ss SettingsService) SetChargeIndicatorStatus(p gatt.Peripheral, on bool) error {
+	// TODO: figure out why it takes a few tries to do this?
+	if on {
+		return p.WriteCharacteristic(ss.chargeIndicator, []byte{0x00, 0x00}, false)
+	}
+	return p.WriteCharacteristic(ss.chargeIndicator, []byte{0x02, 0x00}, false)
 }
