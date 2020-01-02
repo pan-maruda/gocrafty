@@ -12,6 +12,7 @@ var CurrentTempUUID = gatt.MustParseUUID("000000114c454b434942265a524f5453")
 var TempSetpointUUID = gatt.MustParseUUID("000000214c454b434942265a524f5453")
 var BoostTempUUID = gatt.MustParseUUID("000000314c454b434942265a524f5453")
 var BatteryLevelUUID = gatt.MustParseUUID("000000414c454b434942265a524f5453")
+var LedUUID = gatt.MustParseUUID("000000514c454b434942265a524f5453")
 
 var DataServiceUUID = gatt.MustParseUUID("00000001-4c45-4b43-4942-265a524f5453")
 
@@ -20,6 +21,7 @@ var ModelUUID = gatt.MustParseUUID("00000022-4c45-4b43-4942-265a524f5453")
 var VersionUUID = gatt.MustParseUUID("00000032-4c45-4b43-4942-265a524f5453")
 var SerialUUID = gatt.MustParseUUID("00000052-4c45-4b43-4942-265a524f5453")
 
+// CraftyMeta contains metadata about connected Crafty, such as FW version, serial number etc.
 type CraftyMeta struct {
 	modelName    string
 	fwVersion    string
@@ -27,30 +29,37 @@ type CraftyMeta struct {
 	id           string
 }
 
+// CraftyStatus represents current state of Crafty, most important to end users.
 type CraftyStatus struct {
 	id           string
 	currentTemp  uint16
 	tempSetpoint uint16
 	boostTemp    uint16
 	batteryLevel uint16
+	led          uint16
 }
 
+// DataService struct contains pointers to discovered characteristics
+// used by this app
 type DataService struct {
 	currentTemp  *gatt.Characteristic
 	tempSetpoint *gatt.Characteristic
 	boostTemp    *gatt.Characteristic
 	batteryLevel *gatt.Characteristic
+	led          *gatt.Characteristic
 }
 
 func (ds DataService) String() string {
-	return fmt.Sprintf("currentTemp  %s, tempSetpoint %s, boostTemp    %s, batteryLevel %s",
+	return fmt.Sprintf("currentTemp  %s, tempSetpoint %s, boostTemp    %s, batteryLevel %s, led %s",
 		ds.currentTemp.UUID(),
 		ds.tempSetpoint.UUID(),
 		ds.boostTemp.UUID(),
 		ds.batteryLevel.UUID(),
+		ds.led.UUID(),
 	)
 }
 
+// SubscribeBattery subscribes to battery level notifications sent by Crafty.
 func (ds DataService) SubscribeBattery(p gatt.Peripheral, f func(uint16, error)) {
 	callback := func(c *gatt.Characteristic, byteValue []byte, err error) {
 		if err != nil {
@@ -69,6 +78,7 @@ func (ds DataService) SubscribeBattery(p gatt.Peripheral, f func(uint16, error))
 	}
 }
 
+// SubscribeTemp subscribes to temperature notifications sent by Crafty.
 func (ds DataService) SubscribeTemp(p gatt.Peripheral, f func(uint16, error)) {
 	callback := func(c *gatt.Characteristic, byteValue []byte, err error) {
 		if err != nil {
@@ -86,6 +96,9 @@ func (ds DataService) SubscribeTemp(p gatt.Peripheral, f func(uint16, error)) {
 	}
 }
 
+// SetTemp sends a write command to set the temperature setpoint.
+// Important: validate this before sending to device. This method does not
+// check whether it's a valid temperature.
 func (ds DataService) SetTemp(p gatt.Peripheral, temp int) {
 	bytes := []byte{0, 0}
 	binary.LittleEndian.PutUint16(bytes, uint16(temp*10))
@@ -96,6 +109,9 @@ func (ds DataService) SetTemp(p gatt.Peripheral, temp int) {
 	}
 }
 
+// SetBoost sends a write command to set the boost level.
+// Important: validate this before sending to device. This method does not
+// check whether it's a valid temperature.
 func (ds DataService) SetBoost(p gatt.Peripheral, boost int) {
 	bytes := []byte{0, 0}
 	binary.LittleEndian.PutUint16(bytes, uint16(boost*10))
@@ -106,48 +122,67 @@ func (ds DataService) SetBoost(p gatt.Peripheral, boost int) {
 	}
 }
 
+// ModelName is model name read from Crafty device.
+// Usually something like "Crafty       "
 func (c CraftyMeta) ModelName() string {
 	return c.modelName
 }
 
+// FwVersion is firmware version read from Crafty device.
 func (c CraftyMeta) FwVersion() string {
 	return c.fwVersion
 }
 
+// SerialNumber read from Crafty device.
 func (c CraftyMeta) SerialNumber() string {
 	return c.serialNumber
 }
 
+// ID is the device ID as understood as OS bluetooth stack.
 func (c CraftyMeta) ID() string {
 	return c.id
 }
 
+// ID is the device ID as understood as OS bluetooth stack.
 func (c CraftyStatus) ID() string {
 	return c.id
 }
 
+// CurrentTemp returns read chamber temperature in degrees celsius * 10
+// e.g. for current temperature 21.3 deg C this would return 213
 func (c CraftyStatus) CurrentTemp() uint16 {
 	return c.currentTemp
 }
 
+// Setpoint returns set vaping temperature in degrees celsius * 10
+// e.g. for 175 deg Celsius this would return 1750
 func (c CraftyStatus) Setpoint() uint16 {
 	return c.tempSetpoint
 }
 
+// BoostTemp returns current boost in degrees celsius * 10
+// e.g. for boost +20 deg Celsius this would return 200
 func (c CraftyStatus) BoostTemp() uint16 {
 	return c.boostTemp
 }
 
+// BatteryLevel returns charge level in percent (0-100)
 func (c CraftyStatus) BatteryLevel() uint16 {
 	return c.batteryLevel
 }
 
+// LEDBrightness returns LED Brightness level in percent (0-100)
+func (c CraftyStatus) LEDBrightness() uint16 {
+	return c.led
+}
+
 func (c CraftyStatus) String() string {
-	return fmt.Sprintf("Current Temp: %d.%d C\nSetpoint: %d C\nBoost: +%d C\nBattery level: %d%%",
+	return fmt.Sprintf("Current Temp: %d.%d C\nSetpoint: %d C\nBoost: +%d C\nBattery level: %d%%\nLED brightness: %d%%",
 		c.CurrentTemp()/10, c.CurrentTemp()%10,
 		c.Setpoint()/10,
 		c.BoostTemp()/10,
-		c.BatteryLevel())
+		c.BatteryLevel(),
+		c.LEDBrightness())
 }
 
 func (c CraftyMeta) String() string {
@@ -157,6 +192,7 @@ func (c CraftyMeta) String() string {
 	)
 }
 
+// ReadUint16 reads a little-endian uint16 from given characteristic
 func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
 
 	value, err := p.ReadCharacteristic(c)
@@ -171,6 +207,8 @@ func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
 	}
 	return 0, fmt.Errorf("characteristic %s read != 2 bytes: %x", c.UUID(), value)
 }
+
+// ReadString reads a NUL-terminated ASCII string from given characteristic
 func ReadString(p gatt.Peripheral, c *gatt.Characteristic) (string, error) {
 	bytes, err := p.ReadCharacteristic(c)
 
@@ -190,7 +228,7 @@ func clen(n []byte) int {
 	return len(n)
 }
 
-// Reads characteristics from the devices
+// ReadMetadataService fills in a CraftyMetadata struct wiht values read from device.
 func ReadMetadataService(p gatt.Peripheral, svc *gatt.Service) (*CraftyMeta, error) {
 	chars, err := p.DiscoverCharacteristics([]gatt.UUID{ModelUUID, VersionUUID, SerialUUID}, svc)
 
@@ -222,6 +260,7 @@ func ReadMetadataService(p gatt.Peripheral, svc *gatt.Service) (*CraftyMeta, err
 	return &metadata, nil
 }
 
+// DiscoverDataService discovers characteristics and returns a pointer to DataService struct
 func DiscoverDataService(p gatt.Peripheral, svc *gatt.Service) (*DataService, error) {
 	chars, err := p.DiscoverCharacteristics([]gatt.UUID{TempSetpointUUID, CurrentTempUUID, BoostTempUUID, BatteryLevelUUID}, svc)
 
@@ -251,11 +290,16 @@ func DiscoverDataService(p gatt.Peripheral, svc *gatt.Service) (*DataService, er
 			dataService.batteryLevel = char
 			continue
 		}
+		if char.UUID().Equal(LedUUID) {
+			dataService.led = char
+			continue
+		}
 	}
 
 	return &dataService, nil
 }
 
+// ReadDataServiceCharacteristics reads values from data service and returns a pointer to CraftyStatus struct
 func ReadDataServiceCharacteristics(p gatt.Peripheral, ds *DataService) (*CraftyStatus, error) {
 	craftyStatus := CraftyStatus{}
 
@@ -281,6 +325,12 @@ func ReadDataServiceCharacteristics(p gatt.Peripheral, ds *DataService) (*Crafty
 		craftyStatus.batteryLevel = intValue
 	} else {
 		fmt.Printf("error reading batteryLevel: %s", err)
+	}
+
+	if intValue, err := ReadUint16(p, ds.led); err == nil {
+		craftyStatus.led = intValue
+	} else {
+		fmt.Printf("error reading led: %s", err)
 	}
 
 	return &craftyStatus, nil
