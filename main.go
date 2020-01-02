@@ -22,7 +22,7 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	}
 }
 
-func onPeriphDiscovered(craftyID string) func(gatt.Peripheral, *gatt.Advertisement, int) {
+func onPeriphDiscovered(craftyID string, done <-chan bool) func(gatt.Peripheral, *gatt.Advertisement, int) {
 
 	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 		// TODO add selection list or mac input, not connect to the first one
@@ -34,9 +34,10 @@ func onPeriphDiscovered(craftyID string) func(gatt.Peripheral, *gatt.Advertiseme
 
 }
 
-func onPeriphConnected(craftyID string) func(gatt.Peripheral, error) {
+func onPeriphConnected(craftyID string, done chan bool, commands []string) func(gatt.Peripheral, error) {
 
 	return func(p gatt.Peripheral, err error) {
+
 		if p.ID() != craftyID {
 			fmt.Printf("Unexpected device ID [%s] connected instead of [%s]. WTF?", p.ID(), craftyID)
 			return
@@ -44,39 +45,69 @@ func onPeriphConnected(craftyID string) func(gatt.Peripheral, error) {
 
 		p.Device().StopScanning()
 
-		defer p.Device().CancelConnection(p)
-		defer fmt.Printf("Disconnected from %s", p.ID())
-		defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
-		log.Println("Discovering Crafty services")
-
 		services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID})
 		if err != nil {
 			log.Fatalf("Failed to discover services, err :%s\n", err)
 			return
 		}
 
+		var dataSvc *ble.DataService
+		// var metaSvc *gatt.Service
+
 		for _, svc := range services {
 
 			if svc.UUID().Equal(ble.DataServiceUUID) {
-				data, err := ble.ReadDataServiceCharacteristics(p, svc)
-				if err != nil {
-					log.Printf("Failed to read metadata from Crafty: %s\n", err)
+				// dataSvc = svc
+
+				if disc, err := ble.DiscoverDataService(p, svc); err == nil {
+					data, err := ble.ReadDataServiceCharacteristics(p, disc)
+					if err != nil {
+						log.Printf("Failed to read metadata from Crafty: %s\n", err)
+						continue
+					}
+					fmt.Println(data)
+					dataSvc = disc
+				} else {
+					log.Printf("Failed to discover Crafty data service: %s\n", err)
 					continue
 				}
-				fmt.Println(data)
+
 			}
 
 			if svc.UUID().Equal(ble.MetaServiceUUID) {
+				// metaSvc = svc
 				meta, err := ble.ReadMetadataService(p, svc)
 				if err != nil {
 					log.Printf("Failed to read metadata from Crafty: %s\n", err)
 					continue
 				}
 				fmt.Println(meta)
-
 			}
-
 		}
+
+		// todo proper cli parsing, not this duct tape mess
+		switch commands[0] {
+		case "monitor":
+			if dataSvc == nil {
+				fmt.Printf("Data service is nil - not discovered? wtf?")
+				break
+			}
+			dataSvc.SubscribeBattery(p, func(batteryLevel uint16, err error) {
+				fmt.Printf("Battery level: %d%%\n", batteryLevel)
+			})
+			dataSvc.SubscribeTemp(p, func(currentTemp uint16, err error) {
+				fmt.Printf("Current Temp: %d.%d C\n", currentTemp/10, currentTemp%10)
+			})
+			select {}
+		default:
+			done <- true
+		}
+
+		// defer p.Device().CancelConnection(p)
+		// defer fmt.Printf("Disconnected from %s", p.ID())
+		// defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
+		// log.Println("Discovering Crafty services")
+
 	}
 }
 
@@ -95,11 +126,12 @@ func main() {
 	}
 
 	// Register handlers.
-	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID)),
-		gatt.PeripheralConnected(onPeriphConnected))
+	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
+		gatt.PeripheralConnected(onPeriphConnected(craftyID, done, os.Args[1:])))
 	d.Init(onStateChanged)
 	select {
 	case <-done:
-		os.Exit(0)
+		d.StopScanning()
+		return
 	}
 }

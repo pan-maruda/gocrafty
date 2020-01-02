@@ -35,6 +35,57 @@ type CraftyStatus struct {
 	batteryLevel uint16
 }
 
+type DataService struct {
+	currentTemp  *gatt.Characteristic
+	tempSetpoint *gatt.Characteristic
+	boostTemp    *gatt.Characteristic
+	batteryLevel *gatt.Characteristic
+}
+
+func (ds DataService) String() string {
+	return fmt.Sprintf("currentTemp  %s, tempSetpoint %s, boostTemp    %s, batteryLevel %s",
+		ds.currentTemp.UUID(),
+		ds.tempSetpoint.UUID(),
+		ds.boostTemp.UUID(),
+		ds.batteryLevel.UUID(),
+	)
+}
+
+func (ds DataService) SubscribeBattery(p gatt.Peripheral, f func(uint16, error)) {
+	callback := func(c *gatt.Characteristic, byteValue []byte, err error) {
+		if err != nil {
+			fmt.Printf("Error received in notify handler %s", err)
+			return
+		}
+		intValue, err := ReadUint16(p, c)
+		f(intValue, err)
+	}
+
+	p.DiscoverDescriptors(nil, ds.batteryLevel)
+
+	err := p.SetNotifyValue(ds.batteryLevel, callback)
+	if err != nil {
+		fmt.Printf("Failed to subscrbe to battery characteristic: %s\n", err)
+	}
+}
+
+func (ds DataService) SubscribeTemp(p gatt.Peripheral, f func(uint16, error)) {
+	callback := func(c *gatt.Characteristic, byteValue []byte, err error) {
+		if err != nil {
+			fmt.Printf("Error received in notify handler %s", err)
+			return
+		}
+		intValue, err := ReadUint16(p, c)
+		f(intValue, err)
+	}
+	p.DiscoverDescriptors(nil, ds.currentTemp)
+
+	err := p.SetNotifyValue(ds.currentTemp, callback)
+	if err != nil {
+		fmt.Printf("Failed to subscrbe to current temperature characteristic: %s\n", err)
+	}
+}
+
 func (c CraftyMeta) ModelName() string {
 	return c.modelName
 }
@@ -72,8 +123,8 @@ func (c CraftyStatus) BatteryLevel() uint16 {
 }
 
 func (c CraftyStatus) String() string {
-	return fmt.Sprintf("Current Temp: %d C\nSetpoint: %d C\nBoost: +%d C\n Battery level: %d%%",
-		c.CurrentTemp()/10,
+	return fmt.Sprintf("Current Temp: %d.%d C\nSetpoint: %d C\nBoost: +%d C\n Battery level: %d%%",
+		c.CurrentTemp()/10, c.CurrentTemp()%10,
 		c.Setpoint()/10,
 		c.BoostTemp()/10,
 		c.BatteryLevel())
@@ -87,6 +138,7 @@ func (c CraftyMeta) String() string {
 }
 
 func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
+
 	value, err := p.ReadCharacteristic(c)
 	if err != nil {
 		return 0, err
@@ -94,6 +146,8 @@ func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
 
 	if len(value) == 2 {
 		intValue := binary.LittleEndian.Uint16(value[0:])
+		// fmt.Printf("DEBUG: read %d from %s characteristic \n", intValue, c.UUID())
+
 		return intValue, nil
 	}
 	return 0, fmt.Errorf("characteristic %s read != 2 bytes: %x", c.UUID(), value)
@@ -149,7 +203,7 @@ func ReadMetadataService(p gatt.Peripheral, svc *gatt.Service) (*CraftyMeta, err
 	return &metadata, nil
 }
 
-func ReadDataServiceCharacteristics(p gatt.Peripheral, svc *gatt.Service) (*CraftyStatus, error) {
+func DiscoverDataService(p gatt.Peripheral, svc *gatt.Service) (*DataService, error) {
 	chars, err := p.DiscoverCharacteristics([]gatt.UUID{TempSetpointUUID, CurrentTempUUID, BoostTempUUID, BatteryLevelUUID}, svc)
 
 	if err != nil {
@@ -157,28 +211,57 @@ func ReadDataServiceCharacteristics(p gatt.Peripheral, svc *gatt.Service) (*Craf
 		return nil, err
 	}
 
-	craftyStatus := CraftyStatus{}
+	dataService := DataService{}
 
 	for _, char := range chars {
-		intValue, err := ReadUint16(p, char)
-		if err != nil {
-			// TODO check if the characteristic is really in the ones we want
-			// fmt.Printf(" read failed: %s", err)
-		} else {
-			if char.UUID().Equal(TempSetpointUUID) {
-				craftyStatus.tempSetpoint = intValue
-			}
-			if char.UUID().Equal(BoostTempUUID) {
-				craftyStatus.boostTemp = intValue
-			}
-			if char.UUID().Equal(CurrentTempUUID) {
-				craftyStatus.currentTemp = intValue
-			}
-			if char.UUID().Equal(BatteryLevelUUID) {
-				craftyStatus.batteryLevel = intValue
-			}
+		if char.UUID().Equal(TempSetpointUUID) {
+			dataService.tempSetpoint = char
+			continue
 		}
+		if char.UUID().Equal(BoostTempUUID) {
+			dataService.boostTemp = char
+			continue
 
+		}
+		if char.UUID().Equal(CurrentTempUUID) {
+			dataService.currentTemp = char
+			continue
+
+		}
+		if char.UUID().Equal(BatteryLevelUUID) {
+			dataService.batteryLevel = char
+			continue
+		}
+	}
+
+	return &dataService, nil
+}
+
+func ReadDataServiceCharacteristics(p gatt.Peripheral, ds *DataService) (*CraftyStatus, error) {
+	craftyStatus := CraftyStatus{}
+
+	if intValue, err := ReadUint16(p, ds.currentTemp); err == nil {
+		craftyStatus.currentTemp = intValue
+	} else {
+		fmt.Printf("error reading currentTemp: %s", err)
+	}
+
+	if intValue, err := ReadUint16(p, ds.boostTemp); err == nil {
+		craftyStatus.boostTemp = intValue
+	} else {
+		fmt.Printf("error reading boostTemp: %s", err)
+	}
+
+	if intValue, err := ReadUint16(p, ds.tempSetpoint); err == nil {
+		craftyStatus.tempSetpoint = intValue
+	} else {
+		fmt.Printf("error reading tempSetpoint: %s", err)
+	}
+
+	if intValue, err := ReadUint16(p, ds.batteryLevel); err == nil {
+		craftyStatus.batteryLevel = intValue
+	} else {
+		fmt.Printf("error reading batteryLevel: %s", err)
 	}
 
 	return &craftyStatus, nil
