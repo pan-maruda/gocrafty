@@ -8,20 +8,24 @@ import (
 	"github.com/paypal/gatt"
 )
 
+var DataServiceUUID = gatt.MustParseUUID("00000001-4c45-4b43-4942-265a524f5453")
+
 var CurrentTempUUID = gatt.MustParseUUID("000000114c454b434942265a524f5453")
 var TempSetpointUUID = gatt.MustParseUUID("000000214c454b434942265a524f5453")
 var BoostTempUUID = gatt.MustParseUUID("000000314c454b434942265a524f5453")
 var BatteryLevelUUID = gatt.MustParseUUID("000000414c454b434942265a524f5453")
 var LedUUID = gatt.MustParseUUID("000000514c454b434942265a524f5453")
-
-var DataServiceUUID = gatt.MustParseUUID("00000001-4c45-4b43-4942-265a524f5453")
+var TurnOnUUID = gatt.MustParseUUID("000000814c454b434942265a524f5453")
+var TurnOffUUID = gatt.MustParseUUID("000000914c454b434942265a524f5453")
 
 var MetaServiceUUID = gatt.MustParseUUID("00000002-4c45-4b43-4942-265a524f5453")
+
 var ModelUUID = gatt.MustParseUUID("00000022-4c45-4b43-4942-265a524f5453")
 var VersionUUID = gatt.MustParseUUID("00000032-4c45-4b43-4942-265a524f5453")
 var SerialUUID = gatt.MustParseUUID("00000052-4c45-4b43-4942-265a524f5453")
 
 var SettingsServiceUUID = gatt.MustParseUUID("00000003-4c45-4b43-4942-265a524f5453")
+
 var ChargeIndicatorUUID = gatt.MustParseUUID("000001c34c454b434942265a524f5453")
 
 // CraftyMeta contains metadata about connected Crafty, such as FW version, serial number etc.
@@ -50,6 +54,8 @@ type DataService struct {
 	boostTemp    *gatt.Characteristic
 	batteryLevel *gatt.Characteristic
 	led          *gatt.Characteristic
+	turnOn       *gatt.Characteristic
+	turnOff      *gatt.Characteristic
 }
 
 // SettingsService struct contains pointers to characteristics
@@ -130,6 +136,10 @@ func (ds DataService) SetBoost(p gatt.Peripheral, boost int) {
 	if err != nil {
 		fmt.Printf("failed to set boost: %s", err)
 	}
+}
+
+func (ds DataService) TurnOn(p gatt.Peripheral) error {
+	return p.WriteCharacteristic(ds.turnOn, []byte{0, 0}, false)
 }
 
 // ModelName is model name read from Crafty device.
@@ -302,6 +312,14 @@ func DiscoverDataService(p gatt.Peripheral, svc *gatt.Service) (*DataService, er
 		}
 		if char.UUID().Equal(LedUUID) {
 			dataService.led = char
+			continue
+		}
+		if char.UUID().Equal(TurnOnUUID) {
+			dataService.turnOn = char
+			continue
+		}
+		if char.UUID().Equal(TurnOffUUID) {
+			dataService.turnOff = char
 			continue
 		}
 	}

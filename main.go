@@ -108,18 +108,27 @@ func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Periphe
 	}
 }
 
-func monitor(p gatt.Peripheral, dataSvc *ble.DataService, settingsSvc *ble.SettingsService) {
-	if dataSvc == nil {
-		fmt.Printf("Data service is nil - not discovered? wtf?")
-		return
+func monitor(turnOn *bool) func(p gatt.Peripheral, dataSvc *ble.DataService, settingsSvc *ble.SettingsService) {
+	return func(p gatt.Peripheral, dataSvc *ble.DataService, settingsSvc *ble.SettingsService) {
+		if dataSvc == nil {
+			fmt.Printf("Data service is nil - not discovered? wtf?")
+			return
+		}
+		if *turnOn {
+			fmt.Println("Turning Crafty ON...")
+			err := dataSvc.TurnOn(p)
+			if err != nil {
+				fmt.Printf("Failed to send turn on command to Crafty: %s", err)
+			}
+		}
+		dataSvc.SubscribeBattery(p, func(batteryLevel uint16, err error) {
+			fmt.Printf("Battery level: %d%%\n", batteryLevel)
+		})
+		dataSvc.SubscribeTemp(p, func(currentTemp uint16, err error) {
+			fmt.Printf("Current Temp: %d.%d C\n", currentTemp/10, currentTemp%10)
+		})
+		select {}
 	}
-	dataSvc.SubscribeBattery(p, func(batteryLevel uint16, err error) {
-		fmt.Printf("Battery level: %d%%\n", batteryLevel)
-	})
-	dataSvc.SubscribeTemp(p, func(currentTemp uint16, err error) {
-		fmt.Printf("Current Temp: %d.%d C\n", currentTemp/10, currentTemp%10)
-	})
-	select {}
 }
 
 func setValues(temp *int, boost *int, chargeIndicator *string, done chan bool) func(gatt.Peripheral, *ble.DataService, *ble.SettingsService) {
@@ -201,11 +210,12 @@ func main() {
 	var tempFlag = flag.Int("set-temp", -1, "set base vape temperature point")
 	var boostTempFlag = flag.Int("set-boost", -1, "set boost value (positive only)")
 	var chargeIndicator = flag.String("set-charge-indicator", "", "set charging indicator ON or OFF")
+	var turnOnFlag = flag.Bool("turn-on", false, "turn the Crafty ON remotely")
 	flag.Parse()
 	d.Init(onStateChanged)
 	if *tempFlag == -1 && *boostTempFlag == -1 && *chargeIndicator == "" {
 		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
-			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, monitor)))
+			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, monitor(turnOnFlag))))
 	} else {
 		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
 			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, setValues(tempFlag, boostTempFlag, chargeIndicator, done))))
