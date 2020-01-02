@@ -86,6 +86,26 @@ func (ds DataService) SubscribeTemp(p gatt.Peripheral, f func(uint16, error)) {
 	}
 }
 
+func (ds DataService) SetTemp(p gatt.Peripheral, temp int) {
+	bytes := []byte{0, 0}
+	binary.LittleEndian.PutUint16(bytes, uint16(temp*10))
+
+	err := p.WriteCharacteristic(ds.tempSetpoint, bytes, true)
+	if err != nil {
+		fmt.Printf("failed to set temperature: %s", err)
+	}
+}
+
+func (ds DataService) SetBoost(p gatt.Peripheral, boost int) {
+	bytes := []byte{0, 0}
+	binary.LittleEndian.PutUint16(bytes, uint16(boost*10))
+
+	err := p.WriteCharacteristic(ds.boostTemp, bytes, true)
+	if err != nil {
+		fmt.Printf("failed to set boost: %s", err)
+	}
+}
+
 func (c CraftyMeta) ModelName() string {
 	return c.modelName
 }
@@ -123,7 +143,7 @@ func (c CraftyStatus) BatteryLevel() uint16 {
 }
 
 func (c CraftyStatus) String() string {
-	return fmt.Sprintf("Current Temp: %d.%d C\nSetpoint: %d C\nBoost: +%d C\n Battery level: %d%%",
+	return fmt.Sprintf("Current Temp: %d.%d C\nSetpoint: %d C\nBoost: +%d C\nBattery level: %d%%",
 		c.CurrentTemp()/10, c.CurrentTemp()%10,
 		c.Setpoint()/10,
 		c.BoostTemp()/10,
@@ -146,7 +166,6 @@ func ReadUint16(p gatt.Peripheral, c *gatt.Characteristic) (uint16, error) {
 
 	if len(value) == 2 {
 		intValue := binary.LittleEndian.Uint16(value[0:])
-		// fmt.Printf("DEBUG: read %d from %s characteristic \n", intValue, c.UUID())
 
 		return intValue, nil
 	}

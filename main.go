@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -34,7 +35,7 @@ func onPeriphDiscovered(craftyID string, done <-chan bool) func(gatt.Peripheral,
 
 }
 
-func onPeriphConnected(craftyID string, done chan bool, commands []string) func(gatt.Peripheral, error) {
+func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Peripheral, *ble.DataService)) func(gatt.Peripheral, error) {
 
 	return func(p gatt.Peripheral, err error) {
 
@@ -85,28 +86,56 @@ func onPeriphConnected(craftyID string, done chan bool, commands []string) func(
 			}
 		}
 
-		// todo proper cli parsing, not this duct tape mess
-		switch commands[0] {
-		case "monitor":
-			if dataSvc == nil {
-				fmt.Printf("Data service is nil - not discovered? wtf?")
-				break
+		action(p, dataSvc)
+	}
+}
+
+func monitor(p gatt.Peripheral, dataSvc *ble.DataService) {
+	if dataSvc == nil {
+		fmt.Printf("Data service is nil - not discovered? wtf?")
+		return
+	}
+	dataSvc.SubscribeBattery(p, func(batteryLevel uint16, err error) {
+		fmt.Printf("Battery level: %d%%\n", batteryLevel)
+	})
+	dataSvc.SubscribeTemp(p, func(currentTemp uint16, err error) {
+		fmt.Printf("Current Temp: %d.%d C\n", currentTemp/10, currentTemp%10)
+	})
+	select {}
+}
+
+func setValues(temp *int, boost *int, done chan bool) func(gatt.Peripheral, *ble.DataService) {
+	// todo validate this somewhere else
+	return func(p gatt.Peripheral, ds *ble.DataService) {
+		if temp != nil && *temp != -1 {
+			if *temp > 210 {
+				fmt.Println("Temperature cannot exceed 210.")
 			}
-			dataSvc.SubscribeBattery(p, func(batteryLevel uint16, err error) {
-				fmt.Printf("Battery level: %d%%\n", batteryLevel)
-			})
-			dataSvc.SubscribeTemp(p, func(currentTemp uint16, err error) {
-				fmt.Printf("Current Temp: %d.%d C\n", currentTemp/10, currentTemp%10)
-			})
-			select {}
-		default:
-			done <- true
+			if *temp < 0 {
+				fmt.Println("Temperature must be positive.")
+			}
+			fmt.Printf("Setting temperature point to %d\n", *temp)
+			ds.SetTemp(p, *temp)
 		}
 
-		// defer p.Device().CancelConnection(p)
-		// defer fmt.Printf("Disconnected from %s", p.ID())
-		// defer p.Device().Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
-		// log.Println("Discovering Crafty services")
+		if boost != nil && *boost != -1 {
+			var validBoost int
+			if *boost < 0 {
+				fmt.Println("Boost must be positive.")
+			}
+			if *temp+*boost > 210 {
+				validBoost = (210 - *temp)
+				fmt.Printf("Clamped boost temp to +%d C\n", validBoost)
+			} else {
+				validBoost = *boost
+			}
+
+			if validBoost != 0 {
+				fmt.Printf("Setting boost temp to +%d C\n", validBoost)
+				ds.SetBoost(p, validBoost)
+			}
+		}
+		done <- true
 
 	}
 }
@@ -125,10 +154,20 @@ func main() {
 		return
 	}
 
-	// Register handlers.
-	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
-		gatt.PeripheralConnected(onPeriphConnected(craftyID, done, os.Args[1:])))
+	// var oneshot = flag.Bool("oneshot", false, "Read data only once (no notifications)")
+	var tempFlag = flag.Int("set-temp", -1, "set base vape temperature point")
+	var boostTempFlag = flag.Int("set-boost", -1, "set boost value (positive only)")
+	flag.Parse()
 	d.Init(onStateChanged)
+	if *tempFlag == -1 && *boostTempFlag == -1 {
+		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
+			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, monitor)))
+	} else {
+		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
+			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, setValues(tempFlag, boostTempFlag, done))))
+	}
+
+	// Register handlers.
 	select {
 	case <-done:
 		d.StopScanning()
