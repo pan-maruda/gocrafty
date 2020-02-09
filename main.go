@@ -18,7 +18,6 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 		d.Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
 		return
 	default:
-		fmt.Println("%s", s.String())
 		d.StopScanning()
 	}
 }
@@ -193,6 +192,13 @@ func main() {
 	snHelpText := "CRAFTY_SN must be set to the device serial number from the bottom label, like [CYxxxxxx]"
 
 	done := make(chan bool, 1)
+
+	// var oneshot = flag.Bool("oneshot", false, "Read data only once (no notifications)")
+	var tempFlag = flag.Int("set-temp", -1, "set base vape temperature point")
+	var boostTempFlag = flag.Int("set-boost", -1, "set boost value (positive only)")
+	var chargeIndicator = flag.String("set-charge-indicator", "", "set charging indicator ON or OFF")
+	var turnOnFlag = flag.Bool("turn-on", false, "turn the Crafty ON remotely")
+	flag.Parse()
 	craftySn, found := os.LookupEnv("CRAFTY_SN")
 	if !found || len(craftySn) != 8 {
 		fmt.Println(snHelpText)
@@ -208,12 +214,6 @@ func main() {
 		return
 	}
 
-	// var oneshot = flag.Bool("oneshot", false, "Read data only once (no notifications)")
-	var tempFlag = flag.Int("set-temp", -1, "set base vape temperature point")
-	var boostTempFlag = flag.Int("set-boost", -1, "set boost value (positive only)")
-	var chargeIndicator = flag.String("set-charge-indicator", "", "set charging indicator ON or OFF")
-	var turnOnFlag = flag.Bool("turn-on", false, "turn the Crafty ON remotely")
-	flag.Parse()
 	d.Init(onStateChanged)
 	if *tempFlag == -1 && *boostTempFlag == -1 && *chargeIndicator == "" {
 		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftySn, done)),
