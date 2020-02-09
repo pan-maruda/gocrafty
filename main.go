@@ -8,7 +8,6 @@ import (
 
 	"github.com/pan-maruda/gocrafty/ble"
 	"github.com/paypal/gatt"
-	"github.com/paypal/gatt/examples/option"
 )
 
 func onStateChanged(d gatt.Device, s gatt.State) {
@@ -19,6 +18,7 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 		d.Scan([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID}, false)
 		return
 	default:
+		fmt.Println("%s", s.String())
 		d.StopScanning()
 	}
 }
@@ -29,6 +29,7 @@ func onPeriphDiscovered(craftyID string, done <-chan bool) func(gatt.Peripheral,
 		// TODO add selection list or mac input, not connect to the first one
 		if p.ID() == craftyID {
 			fmt.Printf("Connecting to %s [%s]\n", p.ID(), p.Name())
+			p.Device().StopScanning()
 			p.Device().Connect(p)
 		}
 	}
@@ -200,7 +201,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	d, err := gatt.NewDevice(option.DefaultClientOptions...)
+	d, err := gatt.NewDevice(
+		gatt.LnxMaxConnections(1),
+		gatt.LnxDeviceID(-1, true),
+	)
 	if err != nil {
 		log.Fatalf("Failed to open device, err: %s\n", err)
 		return
