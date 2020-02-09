@@ -43,8 +43,6 @@ func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Periphe
 
 	return func(p gatt.Peripheral, err error) {
 
-		p.Device().StopScanning()
-
 		services, err := p.DiscoverServices([]gatt.UUID{ble.DataServiceUUID, ble.MetaServiceUUID, ble.SettingsServiceUUID})
 		if err != nil {
 			log.Fatalf("Failed to discover services, err :%s\n", err)
@@ -192,10 +190,12 @@ func setValues(temp *int, boost *int, chargeIndicator *string, done chan bool) f
 }
 
 func main() {
+	snHelpText := "CRAFTY_SN must be set to the device serial number from the bottom label, like [CYxxxxxx]"
+
 	done := make(chan bool, 1)
-	craftyID, found := os.LookupEnv("CRAFTY_ID")
-	if !found {
-		fmt.Println("CRAFTY_ID not set, use ./scanner to find your Crafty.")
+	craftySn, found := os.LookupEnv("CRAFTY_SN")
+	if !found || len(craftySn) != 8 {
+		fmt.Println(snHelpText)
 		os.Exit(1)
 	}
 
@@ -216,11 +216,11 @@ func main() {
 	flag.Parse()
 	d.Init(onStateChanged)
 	if *tempFlag == -1 && *boostTempFlag == -1 && *chargeIndicator == "" {
-		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
-			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, monitor(turnOnFlag))))
+		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftySn, done)),
+			gatt.PeripheralConnected(onPeriphConnected(craftySn, done, monitor(turnOnFlag))))
 	} else {
-		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftyID, done)),
-			gatt.PeripheralConnected(onPeriphConnected(craftyID, done, setValues(tempFlag, boostTempFlag, chargeIndicator, done))))
+		d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(craftySn, done)),
+			gatt.PeripheralConnected(onPeriphConnected(craftySn, done, setValues(tempFlag, boostTempFlag, chargeIndicator, done))))
 	}
 
 	// Register handlers.
