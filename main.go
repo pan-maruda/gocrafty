@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
+	"github.com/pan-maruda/gatt"
 	"github.com/pan-maruda/gocrafty/ble"
-	"github.com/paypal/gatt"
 )
 
 func onStateChanged(d gatt.Device, s gatt.State) {
@@ -23,27 +23,25 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	}
 }
 
-func onPeriphDiscovered(craftyID string, done <-chan bool) func(gatt.Peripheral, *gatt.Advertisement, int) {
+func onPeriphDiscovered(craftySerialNumber string, done <-chan bool) func(gatt.Peripheral, *gatt.Advertisement, int) {
 
 	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
-		// TODO add selection list or mac input, not connect to the first one
-		if p.ID() == craftyID {
-			fmt.Printf("Connecting to %s [%s]\n", p.ID(), p.Name())
-			p.Device().StopScanning()
-			p.Device().Connect(p)
+		for _, serviceData := range a.ServiceData {
+			if serviceData.UUID.String() == "0052" {
+				snFromDevice := string(serviceData.Data)
+				if snFromDevice[:8] == craftySerialNumber {
+					fmt.Printf("Connecting to %s [%s]\n", p.ID(), p.Name())
+					p.Device().StopScanning()
+					p.Device().Connect(p)
+				}
+			}
 		}
 	}
-
 }
 
 func onPeriphConnected(craftyID string, done chan bool, action func(gatt.Peripheral, *ble.DataService, *ble.SettingsService)) func(gatt.Peripheral, error) {
 
 	return func(p gatt.Peripheral, err error) {
-
-		if p.ID() != craftyID {
-			fmt.Printf("Unexpected device ID [%s] connected instead of [%s]. WTF?", p.ID(), craftyID)
-			return
-		}
 
 		p.Device().StopScanning()
 

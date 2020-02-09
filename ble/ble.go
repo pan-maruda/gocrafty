@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/paypal/gatt"
+	"github.com/pan-maruda/gatt"
 )
 
 var DataServiceUUID = gatt.MustParseUUID("00000001-4c45-4b43-4942-265a524f5453")
